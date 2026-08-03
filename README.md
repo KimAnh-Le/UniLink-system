@@ -1,6 +1,6 @@
 # UniLink ABC University Student Enquiry and Appointment System
 
-UniLink is a unified web platform designed for the ABC university. It bridges the gap between students, academic advisors, administrative officers, and university management through streamlined enquiry tracking, appointment scheduling, student records management, and AI-assisted support.
+UniLink is a unified web platform designed for the ABC university. It bridges the gap between students, Administrative Officers, Student Support Officers:, and university management through streamlined enquiry tracking, appointment scheduling, student records management, and AI-assisted support.
 
 ---
 
