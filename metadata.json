@@ -1,0 +1,6 @@
+{
+  "name": "CampusConnect - Student & Admin Portal",
+  "description": "Unified portal for Students, Admins, Managers, and SSO authentication to manage student records, enquiries, and appointments.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
