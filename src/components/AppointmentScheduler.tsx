@@ -35,46 +35,7 @@ const TIME_SLOTS_30_MIN = [
 ];
 
 const formatTimeRange = (timeStr: string, durationMins: number = 30) => {
-  if (!timeStr) return durationMins === 15 ? '09:00 AM - 09:15 AM' : '09:00 AM - 09:30 AM';
-  if (timeStr.includes('-')) return timeStr;
-
-  const clean = timeStr.trim();
-  const match = clean.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-  if (match) {
-    let hour = parseInt(match[1], 10);
-    const min = parseInt(match[2], 10);
-    let period = match[3] ? match[3].toUpperCase() : '';
-
-    if (!period) {
-      period = hour >= 8 && hour <= 11 ? 'AM' : 'PM';
-    }
-
-    let hour24 = hour;
-    if (period === 'PM' && hour < 12) hour24 += 12;
-    if (period === 'AM' && hour === 12) hour24 = 0;
-
-    let startHour12 = hour24 % 12;
-    if (startHour12 === 0) startHour12 = 12;
-    const startHourStr = startHour12 < 10 ? `0${startHour12}` : `${startHour12}`;
-    const startMinStr = min < 10 ? `0${min}` : `${min}`;
-    const startTimeFormatted = `${startHourStr}:${startMinStr} ${period}`;
-
-    const dur = durationMins > 0 ? durationMins : 30;
-    const endTotalMins = (hour24 * 60 + min + dur) % 1440;
-    const endHour24 = Math.floor(endTotalMins / 60);
-    const endMin = endTotalMins % 60;
-    const endPeriod = endHour24 >= 12 ? 'PM' : 'AM';
-    let endHour12 = endHour24 % 12;
-    if (endHour12 === 0) endHour12 = 12;
-
-    const endHourStr = endHour12 < 10 ? `0${endHour12}` : `${endHour12}`;
-    const endMinStr = endMin < 10 ? `0${endMin}` : `${endMin}`;
-    const endTimeFormatted = `${endHourStr}:${endMinStr} ${endPeriod}`;
-
-    return `${startTimeFormatted} - ${endTimeFormatted}`;
-  }
-
-  return clean;
+  return formatDynamicTimeRange(timeStr, durationMins);
 };
 
 const formatDynamicTimeRange = (timeStr: string, durationMins: number = 30) => {
@@ -209,8 +170,14 @@ export const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
   const [bufferTime, setBufferTime] = useState<string>('ALL SLOTS');
   const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week' | 'day'>('month');
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string>(realTodayIso);
+  const [dateFilterMode, setDateFilterMode] = useState<'selected' | 'all'>('selected');
+  const [upcomingPage, setUpcomingPage] = useState<number>(1);
   const [isCreatingNew, setIsCreatingNew] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    setUpcomingPage(1);
+  }, [selectedCalendarDate, dateFilterMode, bufferTime, searchQuery, selectedTimezone]);
   const [fileModalData, setFileModalData] = useState<{
     fileName: string;
     studentName?: string;
@@ -890,7 +857,10 @@ const getStaffAvailability = (
         <button
           key={`day-${d}`}
           type="button"
-          onClick={() => setSelectedCalendarDate(dateString)}
+          onClick={() => {
+            setSelectedCalendarDate(dateString);
+            setDateFilterMode('selected');
+          }}
           className={`h-16 sm:h-20 p-2 sm:p-2.5 rounded-xl text-xs transition-all cursor-pointer flex flex-col justify-between text-left relative ${
             isSelected
               ? 'border-2 border-indigo-600 dark:border-indigo-500 bg-indigo-50/30 dark:bg-indigo-950/30 font-black shadow-xs ring-1 ring-indigo-500/20'
@@ -909,10 +879,15 @@ const getStaffAvailability = (
           </div>
 
           {hasAppts && (
-            <div className="flex items-center gap-1.5 justify-center w-full pb-0.5">
+            <div className="flex items-center gap-1 justify-center w-full pb-0.5">
               <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block shadow-2xs"></span>
               {dayAppts.length > 1 && (
                 <span className="w-2 h-2 rounded-full bg-amber-500 inline-block shadow-2xs"></span>
+              )}
+              {dayAppts.length > 2 && (
+                <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 leading-none select-none bg-indigo-100 dark:bg-indigo-950/90 px-1 py-0.2 rounded-md border border-indigo-200/60 dark:border-indigo-800/60">
+                  +
+                </span>
               )}
             </div>
           )}
@@ -944,7 +919,10 @@ const getStaffAvailability = (
             <button
               key={dateStr}
               type="button"
-              onClick={() => setSelectedCalendarDate(dateStr)}
+              onClick={() => {
+                setSelectedCalendarDate(dateStr);
+                setDateFilterMode('selected');
+              }}
               className={`min-h-[110px] sm:min-h-[130px] p-2.5 rounded-xl text-left flex flex-col justify-between transition-all cursor-pointer border ${
                 isSelected
                   ? 'border-2 border-indigo-600 dark:border-indigo-500 bg-indigo-50/30 dark:bg-indigo-950/30 shadow-2xs ring-1 ring-indigo-500/20'
@@ -1076,25 +1054,57 @@ const getStaffAvailability = (
     );
   };
 
+  const getApptDurationMins = (a: Appointment): number => {
+    if (a.durationMinutes && a.durationMinutes > 0) return a.durationMinutes;
+    const timeStr = a.scheduledTime || a.time || '';
+    if (!timeStr) return 30;
+    if (timeStr.includes('-')) {
+      const parts = timeStr.split('-');
+      const parseMins = (str: string) => {
+        const match = str.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+        if (!match) return null;
+        let h = parseInt(match[1], 10);
+        const m = parseInt(match[2], 10);
+        const p = match[3] ? match[3].toUpperCase() : '';
+        if (p === 'PM' && h < 12) h += 12;
+        if (p === 'AM' && h === 12) h = 0;
+        return h * 60 + m;
+      };
+      const sM = parseMins(parts[0]);
+      const eM = parseMins(parts[1]);
+      if (sM !== null && eM !== null && eM > sM) return eM - sM;
+    }
+    return 30;
+  };
+
+  const formatShortDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    return dateStr;
+  };
+
   const getUpcomingDisplayAppointments = () => {
     let list = appointments;
 
-    // Buffer Time Filtering (acting as duration filter)
+    // Date Filtering
+    if (dateFilterMode === 'selected' && selectedCalendarDate) {
+      list = list.filter(a => {
+        const sDate = a.scheduledDate || a.date || a.appointmentDate;
+        return sDate === selectedCalendarDate;
+      });
+    }
+
+    // Buffer Time / Duration Filtering
     if (bufferTime === '15 MINS') {
-      list = list.filter(a => {
-        const timeStr = a.scheduledTime || a.time || '';
-        return timeStr.includes('15') || a.id === 'APT-1041' || a.id === 'APT-1045';
-      });
+      list = list.filter(a => getApptDurationMins(a) === 15);
     } else if (bufferTime === '30 MINS') {
-      list = list.filter(a => {
-        const timeStr = a.scheduledTime || a.time || '';
-        return !timeStr.includes('15') && !timeStr.includes('45');
-      });
+      list = list.filter(a => getApptDurationMins(a) === 30);
     } else if (bufferTime === '45 MINS') {
-      list = list.filter(a => {
-        const timeStr = a.scheduledTime || a.time || '';
-        return timeStr.includes('45');
-      });
+      list = list.filter(a => getApptDurationMins(a) === 45);
     }
 
     if (searchQuery.trim()) {
@@ -1109,18 +1119,18 @@ const getStaffAvailability = (
       );
     }
 
-    const exactDateMatches = list.filter(a => {
-      const sDate = a.scheduledDate || a.date || a.appointmentDate;
-      return sDate === selectedCalendarDate;
-    });
-
-    if (exactDateMatches.length > 0) return exactDateMatches;
-
     return list;
   };
 
   if (viewMode === 'list') {
     const displayAppts = getUpcomingDisplayAppointments();
+    const itemsPerPage = 4;
+    const totalUpcomingPages = Math.max(1, Math.ceil(displayAppts.length / itemsPerPage));
+    const validUpcomingPage = Math.min(upcomingPage, totalUpcomingPages);
+    const paginatedAppts = displayAppts.slice(
+      (validUpcomingPage - 1) * itemsPerPage,
+      validUpcomingPage * itemsPerPage
+    );
 
     // Check if showing Appointment Manager view for SSO / Manager
     if ((currentUser.role === 'officer' || currentUser.role === 'manager') && adminScheduleView === 'manager') {
@@ -1286,23 +1296,85 @@ const getStaffAvailability = (
 
             {/* Right Column: Upcoming Appointments */}
             <div className="lg:col-span-5 space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
                   UPCOMING APPOINTMENTS
                 </h2>
-                <span className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-0.5 rounded-md text-[11px] font-extrabold">
-                  {displayAppts.length} TODAY
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-md text-[10px] font-extrabold border border-indigo-200/80 dark:border-indigo-800">
+                    4 per page
+                  </span>
+                  <span className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-0.5 rounded-md text-[11px] font-extrabold">
+                    {displayAppts.length} TOTAL
+                  </span>
+                </div>
+              </div>
+
+              {/* Filter Controls Bar */}
+              <div className="space-y-2 bg-slate-100/90 dark:bg-slate-800/90 p-2 rounded-xl text-xs font-bold border border-slate-200/60 dark:border-slate-700/60">
+                {/* Date Scope Filter */}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 px-1">
+                    Date Scope:
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setDateFilterMode('selected')}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
+                        dateFilterMode === 'selected'
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
+                      }`}
+                    >
+                      Selected ({formatShortDate(selectedCalendarDate)})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDateFilterMode('all')}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
+                        dateFilterMode === 'all'
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
+                      }`}
+                    >
+                      All Dates
+                    </button>
+                  </div>
+                </div>
+
+                {/* Slot Duration Filter */}
+                <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-200/80 dark:border-slate-700/60">
+                  <span className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 px-1">
+                    Filter Slots:
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {(['ALL SLOTS', '15 MINS', '30 MINS'] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setBufferTime(mode)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
+                          bufferTime === mode
+                            ? 'bg-indigo-600 text-white shadow-2xs'
+                            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
+                        }`}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               {/* Cards List */}
-              <div className="space-y-3.5">
+              <div className="space-y-3.5 min-h-[380px]">
                 {displayAppts.length === 0 ? (
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center text-xs text-slate-500 dark:text-slate-400">
                     No appointments scheduled for this date.
                   </div>
                 ) : (
-                  displayAppts.map((appt) => {
+                  paginatedAppts.map((appt) => {
                     const studentObj = students.find(s => s.id === appt.studentId) || students.find(s => s.name === appt.studentName || s.fullName === appt.fullName);
                     const displayName = appt.fullName || appt.studentName || studentObj?.name || 'Nguyen Van A';
                     const displayCategory = appt.category || appt.appointmentCategory || appt.type || 'Course Enrollment Guidance';
@@ -1313,7 +1385,8 @@ const getStaffAvailability = (
                     const currentTzHours = getTimezoneOffsetHours(selectedTimezone);
                     const tzOffsetDiff = currentTzHours - baseTzHours;
 
-                    const effectiveDurationMins = bufferTime === '15 MINS' ? 15 : bufferTime === '30 MINS' ? 30 : slotDuration;
+                    const individualApptMins = getApptDurationMins(appt);
+                    const effectiveDurationMins = bufferTime === '15 MINS' ? 15 : bufferTime === '30 MINS' ? 30 : individualApptMins;
                     const rawTime = appt.scheduledTime || appt.time || '09:30 AM';
                     const shiftedTime = getShiftedTime(rawTime, tzOffsetDiff);
                     const clearTimeRange = formatDynamicTimeRange(shiftedTime, effectiveDurationMins);
@@ -1438,6 +1511,49 @@ const getStaffAvailability = (
                 )}
               </div>
 
+              {/* Pagination Controls Bar */}
+              {displayAppts.length > 0 && (
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold shadow-2xs">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                    Page <strong className="text-slate-900 dark:text-white">{validUpcomingPage}</strong> of <strong className="text-slate-900 dark:text-white">{totalUpcomingPages}</strong> ({displayAppts.length} total slots)
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={validUpcomingPage <= 1}
+                      onClick={() => setUpcomingPage(prev => Math.max(1, prev - 1))}
+                      className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                      <span>Prev</span>
+                    </button>
+                    {Array.from({ length: totalUpcomingPages }, (_, i) => i + 1).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setUpcomingPage(p)}
+                        className={`w-7 h-7 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                          validUpcomingPage === p
+                            ? 'bg-indigo-600 text-white shadow-2xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      disabled={validUpcomingPage >= totalUpcomingPages}
+                      onClick={() => setUpcomingPage(prev => Math.min(totalUpcomingPages, prev + 1))}
+                      className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Next</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Bottom Button: View All Appointments */}
               <button
                 type="button"
@@ -1465,21 +1581,6 @@ const getStaffAvailability = (
               <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
                 Online Today
               </span>
-            </div>
-
-            {/* Buffer Time Selector */}
-            <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200/80 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300">
-              <span className="text-slate-400 uppercase text-[10px] tracking-wider font-bold">FILTER BY BUFFER</span>
-              <select
-                value={bufferTime}
-                onChange={(e) => setBufferTime(e.target.value)}
-                className="bg-transparent font-extrabold text-slate-900 dark:text-white focus:outline-none cursor-pointer text-xs"
-              >
-                <option value="ALL SLOTS">ALL SLOTS</option>
-                <option value="15 MINS">15 MINS SLOT</option>
-                <option value="30 MINS">30 MINS SLOT</option>
-                <option value="45 MINS">45 MINS SLOT</option>
-              </select>
             </div>
 
             {/* Sync Outlook Button */}

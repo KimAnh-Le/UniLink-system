@@ -17,6 +17,48 @@ import {
   Video
 } from 'lucide-react';
 
+const formatApptTime = (timeStr?: string, durationMins?: number) => {
+  if (!timeStr) return durationMins === 15 ? '09:00 AM - 09:15 AM' : '09:00 AM - 09:30 AM';
+  const clean = timeStr.trim();
+  const dur = durationMins && durationMins > 0 ? durationMins : 30;
+
+  const startTimePart = clean.split('-')[0].trim();
+  const match = startTimePart.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (match) {
+    let hour = parseInt(match[1], 10);
+    const min = parseInt(match[2], 10);
+    let period = match[3] ? match[3].toUpperCase() : '';
+
+    if (!period) {
+      period = hour >= 8 && hour <= 11 ? 'AM' : 'PM';
+    }
+
+    let hour24 = hour;
+    if (period === 'PM' && hour < 12) hour24 += 12;
+    if (period === 'AM' && hour === 12) hour24 = 0;
+
+    let startHour12 = hour24 % 12;
+    if (startHour12 === 0) startHour12 = 12;
+    const startHourStr = startHour12 < 10 ? `0${startHour12}` : `${startHour12}`;
+    const startMinStr = min < 10 ? `0${min}` : `${min}`;
+    const startTimeFormatted = `${startHourStr}:${startMinStr} ${period}`;
+
+    const endTotalMins = (hour24 * 60 + min + dur) % 1440;
+    const endHour24 = Math.floor(endTotalMins / 60);
+    const endMin = endTotalMins % 60;
+    const endPeriod = endHour24 >= 12 ? 'PM' : 'AM';
+    let endHour12 = endHour24 % 12;
+    if (endHour12 === 0) endHour12 = 12;
+
+    const endHourStr = endHour12 < 10 ? `0${endHour12}` : `${endHour12}`;
+    const endMinStr = endMin < 10 ? `0${endMin}` : `${endMin}`;
+    const endTimeFormatted = `${endHourStr}:${endMinStr} ${endPeriod}`;
+
+    return `${startTimeFormatted} - ${endTimeFormatted}`;
+  }
+  return clean;
+};
+
 interface SSODashboardProps {
   students: Student[];
   enquiries: Enquiry[];
@@ -244,9 +286,12 @@ export const SSODashboard: React.FC<SSODashboardProps> = ({
                   className="p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer flex items-center justify-between gap-3"
                 >
                   <div className="space-y-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
-                        {appt.scheduledTime || appt.time || '09:30 AM'}
+                        {formatApptTime(appt.scheduledTime || appt.time, appt.durationMinutes || 30)}
+                      </span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300">
+                        {appt.durationMinutes || 30} mins
                       </span>
                       <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
                         {appt.fullName || appt.studentName}
