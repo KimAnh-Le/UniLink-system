@@ -34,8 +34,8 @@ const TIME_SLOTS_30_MIN = [
   '04:30 PM - 05:00 PM'
 ];
 
-const formatTimeRange = (timeStr: string) => {
-  if (!timeStr) return '09:00 AM - 09:30 AM';
+const formatTimeRange = (timeStr: string, durationMins: number = 30) => {
+  if (!timeStr) return durationMins === 15 ? '09:00 AM - 09:15 AM' : '09:00 AM - 09:30 AM';
   if (timeStr.includes('-')) return timeStr;
 
   const clean = timeStr.trim();
@@ -59,7 +59,8 @@ const formatTimeRange = (timeStr: string) => {
     const startMinStr = min < 10 ? `0${min}` : `${min}`;
     const startTimeFormatted = `${startHourStr}:${startMinStr} ${period}`;
 
-    const endTotalMins = (hour24 * 60 + min + 30) % 1440;
+    const dur = durationMins > 0 ? durationMins : 30;
+    const endTotalMins = (hour24 * 60 + min + dur) % 1440;
     const endHour24 = Math.floor(endTotalMins / 60);
     const endMin = endTotalMins % 60;
     const endPeriod = endHour24 >= 12 ? 'PM' : 'AM';
@@ -569,7 +570,19 @@ const getStaffAvailability = (
     setSelectedApptId(appt.id);
     setErrorMessage(null);
     const rawTime = appt.scheduledTime || appt.time || '10:00 AM - 10:30 AM';
-    const formattedTime = formatTimeRange(rawTime);
+
+    let apptDur: 15 | 30 = 30;
+    if (appt.durationMinutes === 15 || appt.durationMinutes === 30) {
+      apptDur = appt.durationMinutes as 15 | 30;
+    } else {
+      const rangeMins = parseTimeRangeToMinutes(rawTime);
+      if (rangeMins && rangeMins.end - rangeMins.start === 15) {
+        apptDur = 15;
+      }
+    }
+    setSlotDuration(apptDur);
+
+    const formattedTime = formatTimeRange(rawTime, apptDur);
     const rawCat = appt.category || appt.appointmentCategory || appt.type || 'Online';
     const simpleCategory = rawCat.toLowerCase().includes('offline') ? 'Offline' : 'Online';
     const realTimeDate = appt.appointmentDate || appt.date || appt.createdAt || new Date().toLocaleDateString('en-CA');
@@ -673,7 +686,7 @@ const getStaffAvailability = (
         scheduledDate: formData.scheduledDate,
         time: formData.scheduledTime,
         scheduledTime: formData.scheduledTime,
-        durationMinutes: 30,
+        durationMinutes: slotDuration,
         location: formData.category === 'Offline' ? 'Building A, Room 302' : 'Online Meeting (Teams)',
         appointmentStatus: formData.status,
         status: formData.status,
@@ -702,6 +715,7 @@ const getStaffAvailability = (
         scheduledDate: formData.scheduledDate,
         time: formData.scheduledTime,
         scheduledTime: formData.scheduledTime,
+        durationMinutes: slotDuration,
         attachmentFile: formData.attachmentFile,
         notes: formData.notes
       };
@@ -1648,7 +1662,7 @@ const getStaffAvailability = (
                           {sDate}
                         </td>
                         <td className="py-3 px-4 text-slate-600 dark:text-slate-300 whitespace-nowrap font-medium">
-                          {formatTimeRange(sTime)}
+                          {formatTimeRange(sTime, appt.durationMinutes || 30)}
                         </td>
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
@@ -1991,7 +2005,14 @@ const getStaffAvailability = (
                         <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-bold">
                           <button
                             type="button"
-                            onClick={() => setSlotDuration(15)}
+                            onClick={() => {
+                              setSlotDuration(15);
+                              if (formData.scheduledTime) {
+                                const startTime = formData.scheduledTime.split('-')[0].trim();
+                                const newRange = formatDynamicTimeRange(startTime, 15);
+                                setFormData(prev => ({ ...prev, scheduledTime: newRange }));
+                              }
+                            }}
                             className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
                               slotDuration === 15
                                 ? 'bg-indigo-600 text-white shadow-2xs'
@@ -2002,7 +2023,14 @@ const getStaffAvailability = (
                           </button>
                           <button
                             type="button"
-                            onClick={() => setSlotDuration(30)}
+                            onClick={() => {
+                              setSlotDuration(30);
+                              if (formData.scheduledTime) {
+                                const startTime = formData.scheduledTime.split('-')[0].trim();
+                                const newRange = formatDynamicTimeRange(startTime, 30);
+                                setFormData(prev => ({ ...prev, scheduledTime: newRange }));
+                              }
+                            }}
                             className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
                               slotDuration === 30
                                 ? 'bg-indigo-600 text-white shadow-2xs'
@@ -2041,13 +2069,14 @@ const getStaffAvailability = (
                           <div className="grid grid-cols-3 gap-2.5">
                             {availableSlots.map((baseSlot) => {
                               const timeSlot = convertSlotToTimezone(baseSlot, tzOffsetDiff);
-                              const isSelected = formData.scheduledTime === timeSlot || formData.scheduledTime?.includes(timeSlot);
+                              const fullRangeSlot = formatDynamicTimeRange(timeSlot, slotDuration);
+                              const isSelected = formData.scheduledTime === fullRangeSlot || formData.scheduledTime === timeSlot || formData.scheduledTime?.startsWith(timeSlot);
                               return (
                                 <button
                                   key={baseSlot}
                                   type="button"
                                   onClick={() => {
-                                    setFormData(prev => ({ ...prev, scheduledTime: timeSlot }));
+                                    setFormData(prev => ({ ...prev, scheduledTime: fullRangeSlot }));
                                     if (errorMessage) setErrorMessage(null);
                                   }}
                                   className={`py-2.5 px-3 rounded-lg border text-xs font-semibold transition-all cursor-pointer text-center ${
